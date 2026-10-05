@@ -125,7 +125,7 @@ public sealed class Companion : BackgroundService
                 {
                     var step=itinerary.Steps[itinerary.Step];
                     if(step.Kind==ActionKind.Menu && world.Menu is null && DateTimeOffset.UtcNow-stepStarted<TimeSpan.FromSeconds(20))Note("plan","Wartet auf erwarteten Eintrittsdialog");
-                    else {var error=Submit(step);if(error is not null){itinerary=itinerary with {Status="Angehalten: "+error};if(visit?.Status=="Unterwegs")visit=visit with {Status=itinerary.Status};}}
+                    else {var error=Submit(step,true);if(error is not null){itinerary=itinerary with {Status="Angehalten: "+error};if(visit?.Status=="Unterwegs")visit=visit with {Status=itinerary.Status};}}
                 }
             }
             var batch=new List<ActionRequest>();
@@ -139,11 +139,12 @@ public sealed class Companion : BackgroundService
         }
     }
     private string Audience(Emmy.Core.Channel channel) => channel==Emmy.Core.Channel.Party ? string.Join(",",world?.Entities.Where(e=>e.Kind=="party").Select(e=>e.Identity.Key).Order().ToArray()??[]) : world?.Territory.ToString()??"local";
-    public string? Submit(OperatorRequest request)
+    public string? Submit(OperatorRequest request,bool fromPlan=false)
     {
         lock(gate)
         {
             if(request.Kind==ActionKind.Stop){Stop();return null;}
+            if(!fromPlan&&itinerary?.Status is "Nächsten Schritt vorbereiten" or "Bildauswertung")return "Zuerst den laufenden Ablauf stoppen";
             if(world is null)return "Kein Spielclient verbunden";
             if(actions.Count+dispatched.Count>=32)return "Aktionswarteschlange voll";
             if(request.Kind is ActionKind.Move or ActionKind.Follow or ActionKind.Teleport or ActionKind.Aethernet or ActionKind.ChangeWorld &&
@@ -161,7 +162,7 @@ public sealed class Companion : BackgroundService
                 request.Text,Target:request.Target,Position:request.Position,MenuSignature:signature,Option:option,Destination:request.Destination,
                 ExpectedTerritory:request.ExpectedTerritory,ExpectedWorld:request.ExpectedWorld,Confirmed:request.Confirmed,TargetObject:request.TargetObject,ExpectedLocationKey:request.ExpectedLocationKey);
             var error=ActionPolicy.Validate(action,settings,world,lifetime.Snapshot.Generation,DateTimeOffset.UtcNow);
-            if(error is not null)return error;actions.Enqueue(action);if(itinerary is not null&&itinerary.Status=="Nächsten Schritt vorbereiten")planAction=action.Id;if(visit?.Status=="Unterwegs"&&request.Kind==ActionKind.Capture)visitCaptureAt=DateTimeOffset.UtcNow;Note("queued",$"{request.Kind} vorbereitet");return null;
+            if(error is not null)return error;actions.Enqueue(action);if(fromPlan&&itinerary is not null&&itinerary.Status=="Nächsten Schritt vorbereiten")planAction=action.Id;if(fromPlan&&visit?.Status=="Unterwegs"&&request.Kind==ActionKind.Capture)visitCaptureAt=DateTimeOffset.UtcNow;Note("queued",$"{request.Kind} vorbereitet");return null;
         }
     }
     public string? StartPlan(string title,OperatorRequest[] steps)
@@ -170,6 +171,7 @@ public sealed class Companion : BackgroundService
         {
             if(steps.Length is <1 or >16||steps.Any(s=>s.Kind is ActionKind.Follow or ActionKind.Chat or ActionKind.Stop || s.Kind==ActionKind.Menu && string.IsNullOrWhiteSpace(s.MenuText)))return "Ablauf braucht 1 bis 16 endliche, geprüfte Schritte";
             if(actions.Count>0||dispatched.Count>0)return "Zuerst den laufenden Auftrag stoppen";
+            if(itinerary?.Status is "Nächsten Schritt vorbereiten" or "Bildauswertung")return "Zuerst den laufenden Ablauf stoppen";
             visit=null;itinerary=new(Guid.NewGuid(),title,steps,0,"Nächsten Schritt vorbereiten");planDeadline=DateTimeOffset.UtcNow.AddMinutes(10);stepStarted=DateTimeOffset.UtcNow;return null;
         }
     }

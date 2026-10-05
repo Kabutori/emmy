@@ -131,6 +131,7 @@ try
     Check(visits.StartHouseVisit(recipe with {Guest=b}) is not null,"Unobserved/unpermitted guest cannot acquire a visit memory");
     Check(visits.StartHouseVisit(recipe with {Door=a}) is not null,"House entry must target an observed non-player door");
     Check(visits.StartHouseVisit(recipe) is null,"House recipe binds saved exterior/interior and observed guest");
+    Check(visits.Submit(new(ActionKind.Emote,Text:"wave",Confirmed:true))is not null,"Manual action cannot overwrite an active visit's step ownership");
     BridgeOutput VisitExchange(WorldState w,ActionResult[]? results=null,Frame? image=null)=>visits.Exchange(new(Wire.Version,w with {At=DateTimeOffset.UtcNow},[],results??[],image));
     ActionResult Success(ActionRequest request)=>new(request.Id,Outcome.Succeeded,"Observed result",DateTimeOffset.UtcNow);
     var approach=VisitExchange(entranceWorld).Actions.Single();Check(approach.Kind==ActionKind.Move,"Visit approaches the saved entrance first");
