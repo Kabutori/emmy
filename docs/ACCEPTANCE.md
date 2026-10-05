@@ -1,6 +1,6 @@
 # Acceptance evidence
 
-Automated validation covers identities, tell privacy, typed provider failures, cancellation, budgets, guarded actions, SQLite, two simultaneous tell requests, draft editing/one-time confirmation and finite itinerary progression. API smoke tests exercise the real host over loopback. DOM checks exercise the real frontend JavaScript. The supplied Playwright test is for a machine that can launch Chromium; this workspace blocks the necessary native socket, so **no visual browser acceptance is claimed**.
+Automated validation covers identities, tell privacy, typed provider failures, cancellation, budgets, guarded actions, SQLite, two simultaneous tell requests, draft editing/one-time confirmation, finite itinerary progression and the house-visit recipe including wrong estate, absent guest and stop during image analysis. API smoke tests exercise the real host over loopback. DOM checks exercise the real frontend JavaScript. The supplied Playwright test is for a machine that can launch Chromium; this workspace blocks the necessary native socket, so **no visual browser acceptance is claimed**.
 
 Compilation uses .NET 10.0.401, Dalamud.NET.Sdk 15.0.0 and downloaded Dalamud build references. The Windows host publishes as self-contained win-x64. These are build checks, not an ingame/Windows runtime acceptance.
 
@@ -20,6 +20,6 @@ Required real-client checks before 1.0:
 | Live DeepSeek text and image request | Configured model accepts the actual API format and records usage | Mock contract tested; key required |
 | Forget while model request runs | No later recreation or leakage of deleted data | Generation/store tests passed |
 | Desktop/mobile web surface | No overflow, all controls usable, status and validation visible | DOM checks; rendered browser pending |
-| First complete house visit | Conversation, follow/travel, semantic entry, observed room, confirmed episode | Dedicated workflow and ingame evidence pending |
+| First complete house visit | Conversation, follow/travel, semantic entry, observed room, confirmed episode | Single-dialog saved-instance recipe and episode regression passed; native evidence/multistage entry pending |
 
 The preview does not ship native live voice, autonomous combat, general quests or economic routines. They remain separately scoped work in STATUS.md. Unrecognized callback families, three-button/hold confirmations and arbitrary commands are not supported.

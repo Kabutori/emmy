@@ -53,6 +53,7 @@ app.MapPost("/api/forget",(Forget f,Companion c)=>{c.Forget(f.Person,f.History,f
 app.MapPut("/api/memory",(MemoryRecord m,Companion c)=>{if(m.Text.Length>4000||m.Source.Length>1000)return Results.BadRequest();c.AddMemory(m);return Results.Ok();});
 app.MapDelete("/api/memory/{id:guid}",(Guid id,Companion c)=>{c.DeleteMemory(id);return Results.Ok();});
 app.MapPost("/api/plan",(PlanInput p,Companion c)=>{var error=c.StartPlan(p.Title,p.Steps);return error is null?Results.Ok():Results.BadRequest(new {error});});
+app.MapPost("/api/house-visit",(HouseVisitRequest p,Companion c)=>{var error=c.StartHouseVisit(p);return error is null?Results.Ok():Results.BadRequest(new {error});});
 app.MapPost("/api/place",(OperatorChat p,Companion c)=>{var error=c.SavePlace(p.Text);return error is null?Results.Ok():Results.BadRequest(new {error});});
 app.MapPost("/api/place/{id:guid}/visit",(Guid id,Companion c)=>{var error=c.VisitPlace(id);return error is null?Results.Ok():Results.BadRequest(new {error});});
 app.MapDelete("/api/place/{id:guid}",(Guid id,Companion c)=>{c.DeletePlace(id);return Results.Ok();});

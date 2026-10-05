@@ -21,19 +21,24 @@ public sealed class Companion : BackgroundService
     private readonly System.Threading.Channels.Channel<ChatEvent> incoming = System.Threading.Channels.Channel.CreateBounded<ChatEvent>(new BoundedChannelOptions(128){SingleReader=true});
     private Settings settings;
     private WorldState? world;
+    private string boundCharacter="";
     private DateTimeOffset heartbeat;
     private Frame? frame;
     private Observation? observation;
     private ChatEvent? pendingVisual;
     private Itinerary? itinerary;
     private Guid? planAction;
+    private DateTimeOffset planDeadline,stepStarted;
+    private DateTimeOffset visitCaptureAt;
+    private VisitEpisode? visit;
+    private string visitQuestion="";
     private string status = "Wartet auf Spielclient";
     private long inputTokens, outputTokens;
     public Guid Epoch { get; } = Guid.NewGuid();
     public Companion(Store store,Secrets secrets,DeepSeekClient provider) { this.store=store; this.secrets=secrets; this.provider=provider; settings=store.Load(); }
     public Settings Settings { get {lock(gate)return settings;} }
     public object State() {lock(gate)return new {settings,world,status,epoch=Epoch,generation=lifetime.Snapshot.Generation,drafts=drafts.Values.ToArray(),observation,
-        places=store.Places(),itinerary,diagnostics=diagnostics.Reverse().ToArray(),results=store.Results(),memories=store.Memories(),usage=new {inputTokens,outputTokens},keyConfigured=!string.IsNullOrEmpty(secrets.Read())};}
+        places=store.Places(),itinerary,visit,diagnostics=diagnostics.Reverse().ToArray(),results=store.Results(),memories=store.Memories(),usage=new {inputTokens,outputTokens},keyConfigured=!string.IsNullOrEmpty(secrets.Read())};}
     private void Note(string kind,string detail) {lock(gate) {diagnostics.Enqueue(new(DateTimeOffset.UtcNow,kind,detail));while(diagnostics.Count>100)diagnostics.Dequeue();status=detail;}}
     public bool Configure(Settings next)
     {
@@ -47,7 +52,9 @@ public sealed class Companion : BackgroundService
     {
         lock(gate) {lifetime.Stop();actions.Clear();drafts.Clear();latest.Clear();pendingVisual=null;
             foreach(var action in dispatched.Values)store.Result(new(action.Id,Outcome.Unknown,"Durch Stop beendet; Wirkung nicht erneut ausführen",DateTimeOffset.UtcNow));
-            dispatched.Clear();if(itinerary is not null)itinerary=itinerary with {Status=reason};planAction=null;Note("stop",reason);}
+            dispatched.Clear();if(itinerary is not null)itinerary=itinerary with {Status=reason};
+            if(visit?.Status is "Unterwegs" or "Bildauswertung")visit=visit with {Status=reason};
+            planAction=null;Note("stop",reason);}
     }
     public void SetMode(Mode mode) {lock(gate){if(!Enum.IsDefined(mode))throw new ArgumentException("Ungültiger Betriebsmodus");Stop();settings=settings with {Mode=mode,Revision=settings.Revision+1};store.Save(settings);}}
     public BridgeOutput Exchange(BridgeInput input)
@@ -59,8 +66,13 @@ public sealed class Companion : BackgroundService
             if(world is not null && (world.ClientId!=input.World.ClientId || world.ZoneGeneration!=input.World.ZoneGeneration))
             {
                 // A deliberate travel step may change territory. It remains bound to the same client and is verified by the executor.
-                if(!dispatched.Values.Any(a=>a.Kind is ActionKind.Teleport or ActionKind.Aethernet or ActionKind.ChangeWorld))Stop("Spielclient oder Gebiet geändert");
+                if(world.ClientId!=input.World.ClientId || !dispatched.Values.Any(ActionPolicy.IsTransition))Stop("Spielclient oder Gebiet geändert");
                 frame=null;observation=null;
+            }
+            if(input.World.Self is not null)
+            {
+                if(boundCharacter.Length>0&&boundCharacter!=input.World.Self.Key)Stop("Charakter geändert");
+                boundCharacter=input.World.Self.Key;
             }
             world=input.World;heartbeat=DateTimeOffset.UtcNow;
             if(input.Frame is not null && input.Frame.ClientId==world.ClientId && input.Frame.ZoneGeneration==world.ZoneGeneration && input.Frame.DataUrl.Length<4_000_000 && input.Frame.DataUrl.StartsWith("data:image/png;base64,"))
@@ -68,17 +80,19 @@ public sealed class Companion : BackgroundService
                 frame=input.Frame;
                 if(pendingVisual is not null){var question=pendingVisual;pendingVisual=null;_ = VisualReply(question,lifetime.Snapshot.Generation,settings.Revision);}
             }
-            foreach(var result in input.Results)
+            foreach(var reported in input.Results)
             {
+                var result=reported;
                 if(!dispatched.TryGetValue(result.Id,out var action))continue;
+                if(result.Outcome==Outcome.Succeeded&&ActionPolicy.IsTransition(action)&&!ActionPolicy.TransitionReached(action,world))result=result with {Outcome=Outcome.Unknown,Detail="Zielzustand im Host nicht bestätigt"};
                 store.Result(result);Note("action",result.Detail);
                 if(result.Outcome==Outcome.Accepted)continue;
                 dispatched.Remove(result.Id);
                 if(planAction==result.Id && itinerary is not null)
                 {
                     planAction=null;
-                    if(result.Outcome==Outcome.Succeeded) itinerary=itinerary with {Step=itinerary.Step+1,Status="Nächsten Schritt vorbereiten"};
-                    else itinerary=itinerary with {Status="Angehalten: "+result.Detail};
+                    if(result.Outcome==Outcome.Succeeded) {itinerary=itinerary with {Step=itinerary.Step+1,Status="Nächsten Schritt vorbereiten"};stepStarted=DateTimeOffset.UtcNow;if(visit?.Status=="Unterwegs")visit=visit with {Actions=[..visit.Actions,result.Id]};}
+                    else {itinerary=itinerary with {Status="Angehalten: "+result.Detail};if(visit?.Status=="Unterwegs")visit=visit with {Status=itinerary.Status};}
                 }
                 if(result.Outcome==Outcome.Succeeded)
                 {
@@ -94,16 +108,31 @@ public sealed class Companion : BackgroundService
                 latest[message.Conversation]=message.Id;drafts.Remove(message.Conversation);
                 if(!incoming.Writer.TryWrite(message))Note("backpressure","Gesprächswarteschlange voll");
             }
+            if(itinerary is not null && itinerary.Status=="Nächsten Schritt vorbereiten" && DateTimeOffset.UtcNow>planDeadline)Stop("Ablaufzeit überschritten");
             if(itinerary is not null && planAction is null && itinerary.Status=="Nächsten Schritt vorbereiten")
             {
-                if(itinerary.Step>=itinerary.Steps.Length) {itinerary=itinerary with {Status="Abgeschlossen"};Note("plan","Auftrag abgeschlossen");}
-                else {var error=Submit(itinerary.Steps[itinerary.Step]);if(error is not null)itinerary=itinerary with {Status="Angehalten: "+error};}
+                if(itinerary.Step>=itinerary.Steps.Length)
+                {
+                    if(visit?.Status=="Unterwegs")
+                    {
+                        if(frame is not null && frame.ZoneGeneration==world.ZoneGeneration && frame.At>=visitCaptureAt && frame.At<=DateTimeOffset.UtcNow.AddSeconds(2) && DateTimeOffset.UtcNow-frame.At<TimeSpan.FromSeconds(10))
+                        {visit=visit with {Status="Bildauswertung"};itinerary=itinerary with {Status="Bildauswertung"};_ = FinishVisit(visit,lifetime.Snapshot.Generation);}
+                        else if(DateTimeOffset.UtcNow-stepStarted>TimeSpan.FromSeconds(10)){visit=visit with {Status="Angehalten: Aufnahme fehlt"};itinerary=itinerary with {Status=visit.Status};}
+                    }
+                    else {itinerary=itinerary with {Status="Abgeschlossen"};Note("plan","Auftrag abgeschlossen");}
+                }
+                else
+                {
+                    var step=itinerary.Steps[itinerary.Step];
+                    if(step.Kind==ActionKind.Menu && world.Menu is null && DateTimeOffset.UtcNow-stepStarted<TimeSpan.FromSeconds(20))Note("plan","Wartet auf erwarteten Eintrittsdialog");
+                    else {var error=Submit(step);if(error is not null){itinerary=itinerary with {Status="Angehalten: "+error};if(visit?.Status=="Unterwegs")visit=visit with {Status=itinerary.Status};}}
+                }
             }
             var batch=new List<ActionRequest>();
             while(actions.TryDequeue(out var action))
             {
                 var error=ActionPolicy.Validate(action,settings,world,lifetime.Snapshot.Generation,DateTimeOffset.UtcNow);
-                if(error is not null){Note("rejected",error);continue;}
+                if(error is not null){store.Result(new(action.Id,Outcome.Failed,error,DateTimeOffset.UtcNow));if(planAction==action.Id){planAction=null;if(itinerary is not null)itinerary=itinerary with {Status="Angehalten: "+error};if(visit is not null)visit=visit with {Status="Angehalten: "+error};}Note("rejected",error);continue;}
                 dispatched[action.Id]=action;batch.Add(action);
             }
             return new(Wire.Version,Epoch,lifetime.Snapshot.Generation,settings,batch.ToArray(),status);
@@ -118,7 +147,7 @@ public sealed class Companion : BackgroundService
             if(world is null)return "Kein Spielclient verbunden";
             if(actions.Count+dispatched.Count>=32)return "Aktionswarteschlange voll";
             if(request.Kind is ActionKind.Move or ActionKind.Follow or ActionKind.Teleport or ActionKind.Aethernet or ActionKind.ChangeWorld &&
-                actions.Concat(dispatched.Values).Any(a=>a.Kind is ActionKind.Move or ActionKind.Follow or ActionKind.Teleport or ActionKind.Aethernet or ActionKind.ChangeWorld))return "Ein Bewegungsauftrag läuft bereits; zuerst stoppen";
+                actions.Concat(dispatched.Values).Any(a=>a.Kind is ActionKind.Move or ActionKind.Follow || ActionPolicy.IsTransition(a)))return "Ein Bewegungsauftrag läuft bereits; zuerst stoppen";
             var option=request.Option;
             var signature=request.MenuSignature;
             if(request.Kind==ActionKind.Menu && request.MenuText.Length>0)
@@ -130,9 +159,9 @@ public sealed class Companion : BackgroundService
             }
             var action=new ActionRequest(Guid.NewGuid(),request.Kind,lifetime.Snapshot.Generation,world.ClientId,world.ZoneGeneration,DateTimeOffset.UtcNow.AddSeconds(request.Kind==ActionKind.ChangeWorld?600:request.Kind is ActionKind.Teleport or ActionKind.Aethernet?120:90),
                 request.Text,Target:request.Target,Position:request.Position,MenuSignature:signature,Option:option,Destination:request.Destination,
-                ExpectedTerritory:request.ExpectedTerritory,ExpectedWorld:request.ExpectedWorld,Confirmed:request.Confirmed);
+                ExpectedTerritory:request.ExpectedTerritory,ExpectedWorld:request.ExpectedWorld,Confirmed:request.Confirmed,TargetObject:request.TargetObject,ExpectedLocationKey:request.ExpectedLocationKey);
             var error=ActionPolicy.Validate(action,settings,world,lifetime.Snapshot.Generation,DateTimeOffset.UtcNow);
-            if(error is not null)return error;actions.Enqueue(action);if(itinerary is not null&&itinerary.Status=="Nächsten Schritt vorbereiten")planAction=action.Id;Note("queued",$"{request.Kind} vorbereitet");return null;
+            if(error is not null)return error;actions.Enqueue(action);if(itinerary is not null&&itinerary.Status=="Nächsten Schritt vorbereiten")planAction=action.Id;if(visit?.Status=="Unterwegs"&&request.Kind==ActionKind.Capture)visitCaptureAt=DateTimeOffset.UtcNow;Note("queued",$"{request.Kind} vorbereitet");return null;
         }
     }
     public string? StartPlan(string title,OperatorRequest[] steps)
@@ -141,19 +170,74 @@ public sealed class Companion : BackgroundService
         {
             if(steps.Length is <1 or >16||steps.Any(s=>s.Kind is ActionKind.Follow or ActionKind.Chat or ActionKind.Stop || s.Kind==ActionKind.Menu && string.IsNullOrWhiteSpace(s.MenuText)))return "Ablauf braucht 1 bis 16 endliche, geprüfte Schritte";
             if(actions.Count>0||dispatched.Count>0)return "Zuerst den laufenden Auftrag stoppen";
-            itinerary=new(Guid.NewGuid(),title,steps,0,"Nächsten Schritt vorbereiten");return null;
+            visit=null;itinerary=new(Guid.NewGuid(),title,steps,0,"Nächsten Schritt vorbereiten");planDeadline=DateTimeOffset.UtcNow.AddMinutes(10);stepStarted=DateTimeOffset.UtcNow;return null;
         }
+    }
+    public string? StartHouseVisit(HouseVisitRequest request)
+    {
+        lock(gate)
+        {
+            if(!request.Confirmed)return "Hausbesuch braucht eine ausdrückliche Bestätigung";
+            if(world is null||!settings.Movement||!settings.Menus||!settings.Vision)return "Hausbesuch braucht Spielclient, Bewegung, Menüs und Bildwahrnehmung";
+            var entrance=store.Places().SingleOrDefault(p=>p.Id==request.EntrancePlace);
+            var room=store.Places().SingleOrDefault(p=>p.Id==request.RoomPlace);
+            if(entrance is null||room is null||entrance.Territory==room.Territory||entrance.World!=room.World)return "Eingang und Innenraum müssen als verschiedene Gebiete derselben Welt gespeichert sein";
+            if(!entrance.LocationKey.StartsWith("housing-outdoor:")||!room.LocationKey.StartsWith("housing-indoor:"))return "Eingang und Innenraum brauchen tatsächlich beobachtete Housing-Instanzen; alte Orte neu speichern";
+            if(world.Territory!=entrance.Territory||world.CurrentWorld!=entrance.World||world.LocationKey!=entrance.LocationKey)return "Zuerst zum gespeicherten Eingangsgebiet und Bezirk reisen";
+            if(request.Door.HomeWorld!=0||world.Entities.Count(e=>e.Targetable&&e.Identity.Key==request.Door.Key&&(request.DoorObject.Length==0||e.ObjectKey==request.DoorObject))!=1)return "Eindeutig beobachtete Eingangstür fehlt";
+            if(string.IsNullOrWhiteSpace(request.MenuPrompt)||string.IsNullOrWhiteSpace(request.MenuText)||request.MenuPrompt.Length>2000||request.MenuText.Length>500||request.Question.Length>2000)return "Der genaue Eintrittsdialog und seine Auswahl fehlen";
+            if(request.Guest is not null&&(!settings.People.Any(p=>p.Person.Key==request.Guest.Key&&p.Remember)||!world.Entities.Any(e=>e.Identity.Key==request.Guest.Key)))return "Begleitperson braucht Gedächtnisfreigabe und muss beobachtet sein";
+            var error=StartPlan("Hausbesuch: "+room.Name,[
+                new(ActionKind.Move,Position:entrance.Position,ExpectedLocationKey:entrance.LocationKey,Confirmed:true),
+                new(ActionKind.Interact,Target:request.Door,TargetObject:request.DoorObject,Confirmed:true),
+                new(ActionKind.Menu,MenuPrompt:request.MenuPrompt,MenuText:request.MenuText,ExpectedTerritory:room.Territory,ExpectedWorld:room.World,ExpectedLocationKey:room.LocationKey,Confirmed:true),
+                new(ActionKind.Move,Position:room.Position,ExpectedLocationKey:room.LocationKey,Confirmed:true),
+                new(ActionKind.Capture,Confirmed:true)]);
+            if(error is not null)return error;
+            visit=new(Guid.NewGuid(),room,request.Guest,"Unterwegs",[]);visitQuestion=request.Question;visitCaptureAt=default;return null;
+        }
+    }
+    private async Task FinishVisit(VisitEpisode episode,long generation)
+    {
+        try
+        {
+            WorldState snapshot;string question;
+            CancellationToken token;
+            lock(gate){var ticket=lifetime.Snapshot;if(ticket.Generation!=generation||world is null)return;snapshot=world;question=visitQuestion;token=ticket.Token;}
+            var seenGuest=episode.Guest is null||snapshot.Entities.Any(e=>e.Identity.Key==episode.Guest.Key&&snapshot.Position is not null&&e.Position.Distance(snapshot.Position)<10);
+            var result=await Observe(question,token);
+            lock(gate)
+            {
+                if(!lifetime.IsCurrent(generation)||visit?.Id!=episode.Id||world?.ClientId!=snapshot.ClientId||world.ZoneGeneration!=snapshot.ZoneGeneration)return;
+                var scope=episode.Guest is null?"operator:local":new ChatEvent(Guid.NewGuid(),Emmy.Core.Channel.Tell,episode.Guest,snapshot.Self,"",false,"",snapshot.ZoneGeneration,DateTimeOffset.UtcNow).Conversation;
+                var sources=string.Join(";",episode.Actions.Select(id=>"action:"+id));
+                if(!seenGuest){visit=visit with {Status="Angehalten: Begleitperson im Innenraum nicht beobachtet"};}
+                else if(!result.Success){visit=visit with {Status="Angehalten: "+result.Error};}
+                else if(observation is null){visit=visit with {Status="Angehalten: Bildbeleg fehlt"};}
+                else
+                {
+                    var person=episode.Guest?.Key??"Operator@0";
+                    var guest=episode.Guest is null?"":$"; {episode.Guest.Display} im Innenraum beobachtet";
+                    store.Memory(new(Guid.NewGuid(),person,scope,$"Besuch am gespeicherten Ort {episode.Room.Name}, Gebiet {snapshot.Territory}, Welt {snapshot.CurrentWorld}{guest}.",sources+";observation:"+observation.Id,"confirmed",observation.At));
+                    store.Memory(new(Guid.NewGuid(),person,scope,result.Text,"observation:"+observation.Id,"derived",observation.At));
+                    visit=visit with {Status="Abgeschlossen",Observation=observation.Id};
+                }
+                if(itinerary is not null)itinerary=itinerary with {Status=visit.Status};Note("visit",visit.Status);
+            }
+        }
+        catch(OperationCanceledException){}
     }
     public string? SavePlace(string name)
     {
         lock(gate){if(world?.Position is null||string.IsNullOrWhiteSpace(name)||name.Length>100)return "Aktueller Ort fehlt";
-            store.Place(new(Guid.NewGuid(),name,world.Territory,world.CurrentWorld,world.Position,DateTimeOffset.UtcNow));return null;}
+            store.Place(new(Guid.NewGuid(),name,world.Territory,world.CurrentWorld,world.Position,DateTimeOffset.UtcNow,world.LocationKey));return null;}
     }
     public string? VisitPlace(Guid id)
     {
         lock(gate){var place=store.Places().FirstOrDefault(p=>p.Id==id);if(place is null||world is null)return "Ort fehlt";
             if(place.Territory!=world.Territory||place.World!=world.CurrentWorld)return "Zuerst in die gespeicherte Welt und das Gebiet reisen";
-            return Submit(new(ActionKind.Move,Position:place.Position,Confirmed:true));}
+            if(place.LocationKey.Length>0&&place.LocationKey!=world.LocationKey)return "Gespeicherter Ort liegt in einer anderen Instanz";
+            return Submit(new(ActionKind.Move,Position:place.Position,ExpectedLocationKey:place.LocationKey,Confirmed:true));}
     }
     public void DeletePlace(Guid id)=>store.DeletePlace(id);
     public bool Confirm(Guid id,string? edited)
@@ -193,7 +277,7 @@ public sealed class Companion : BackgroundService
     {
         Frame? capture; (long Generation,CancellationToken Token) ticket;
         lock(gate){capture=frame;ticket=lifetime.Snapshot;}
-        if(!Settings.Vision || capture is null || DateTimeOffset.UtcNow-capture.At>TimeSpan.FromSeconds(10))return new(false,Error:"Kein aktuelles Bild. Im Spiel Aufnahme anfordern.");
+        if(!Settings.Vision || capture is null || capture.At>DateTimeOffset.UtcNow.AddSeconds(2) || DateTimeOffset.UtcNow-capture.At>TimeSpan.FromSeconds(10))return new(false,Error:"Kein aktuelles Bild. Im Spiel Aufnahme anfordern.");
         using var linked=CancellationTokenSource.CreateLinkedTokenSource(external,ticket.Token);
         var result=await Complete($"You are {Settings.Persona}. Answer the question in one or two concise sentences, in its language. Describe only what this image actually shows. State uncertainty. {Settings.Description}",[DeepSeekClient.VisionMessage(question,capture)],linked.Token);
         lock(gate){if(lifetime.IsCurrent(ticket.Generation)&&frame?.ZoneGeneration==capture.ZoneGeneration&&result.Success){observation=new(Guid.NewGuid(),result.Text,"vision",capture.At,capture.ZoneGeneration);Note("vision","Bild ausgewertet");}}

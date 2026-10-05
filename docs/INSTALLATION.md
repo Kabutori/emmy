@@ -26,3 +26,11 @@ Moving with WASD or arrow keys stops Emmy's owned controller when no text input 
 Data live in `%LOCALAPPDATA%/Emmy`: SQLite, the local capability and protected key. The old Dalamud profile database is retained separately. Forget removes the selected person scope from active host data and invalidates open contexts; exports and backups are separate copies. Vision captures the central scene crop of the foreground client, excluding the usual edge/lower HUD. Move private chat panels out of that crop before image use; arbitrary relocated overlays cannot be identified automatically. Minimized, unfocused and near-blank captures are rejected.
 
 Update by stopping the host, unloading the dev plugin, replacing the extracted package and restarting both. Keep a backup of the data directory. Builds refuse to package failed or stale output. The native integrations are a preview and need the [ingame acceptance matrix](ACCEPTANCE.md).
+
+## Saved house visits
+
+First record a meeting point directly beside the exterior door and another at the intended position inside the actual house. The plugin binds exterior places to ward/division and interior places to estate ID and room, so another estate with the same territory template does not count as arrival. Old places without instance metadata must be saved again.
+
+Under Fähigkeiten, choose the entrance, room, currently observed door and optional companion. Enter the exact text of the previously observed entry prompt and its enabled confirmation option, then explicitly start the visit. A companion needs memory permission and must also be observed within 10 units in the room to receive a shared episode. Each step waits for observed success; an unrelated dialog, wrong destination, missing image, provider failure or Stop halts the recipe. It supports one entry confirmation; additional selection/confirmation stages require a separate reviewed recipe.
+
+The event memory records the verified visit with action and image references. The model's interpretation of furniture remains a derived candidate for manual confirmation. The estate adapter uses the matching build's [FFXIVClientStructs HousingManager](https://github.com/aers/FFXIVClientStructs/blob/main/FFXIVClientStructs/FFXIV/Client/Game/HousingManager.cs); native behavior must still be accepted in the client.

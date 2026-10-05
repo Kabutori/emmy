@@ -66,11 +66,12 @@ public sealed class GameExecutor : IDisposable
                     moving=a;started=DateTimeOffset.UtcNow;progressAt=started;progressPosition=world.Position;lastDestination=null;Report(a,Outcome.Accepted,"Bewegung angenommen");break;
                 case ActionKind.Interact:
                     if(world.Menu is not null){Report(a,Outcome.Failed,"Ein Dialog ist schon geöffnet");break;}
-                    var entity=Resolve(a.Target);
+                    var entity=Resolve(a.Target,a.TargetObject);
                     if(entity is null||!entity.IsTargetable||world.Position is null||world.Position.Distance(ToPoint(entity.Position))>4){Report(a,Outcome.Failed,"Ziel nicht in Interaktionsreichweite");break;}
                     unsafe{var target=TargetSystem.Instance();if(target==null){Report(a,Outcome.Failed,"Zielsystem nicht bereit");break;}target->InteractWithObject((GameObject*)entity.Address);}
                     pending.Add(a);Report(a,Outcome.Accepted,"Interaktion angefordert; wartet auf Dialog");break;
                 case ActionKind.Menu:
+                    if(a.ExpectedTerritory>0&&(HasControl||NavBusy||TravelBusy)){Report(a,Outcome.Failed,"Eintrittsressource beschäftigt");break;}
                     if(!menu.Select(a)){Report(a,Outcome.Failed,"Menüauswahl ist nicht mehr gültig");break;}
                     pending.Add(a);Report(a,Outcome.Accepted,"Auswahl übergeben; wartet auf neuen Dialogzustand");break;
                 case ActionKind.Capture:
@@ -98,16 +99,17 @@ public sealed class GameExecutor : IDisposable
         foreach(var a in pending.Where(a=>a.Kind==ActionKind.Chat&&a.Channel==e.Channel&&a.Text==e.Text&&
             (a.Channel!=Emmy.Core.Channel.Tell||a.Target?.Key==e.Recipient?.Key)).ToArray())chatEchoes.Add(a.Id);
     }
-    public bool HasTravel => ownsTravel;
-    public bool HasControl => ownsNav || ownsTravel || moving is not null;
+    public bool HasTravel => ownsTravel || pending.Any(a=>a.Kind==ActionKind.Menu&&a.ExpectedTerritory>0);
+    public bool HasControl => ownsNav || HasTravel || moving is not null;
     public void Tick(WorldState world,long generation)
     {
         if(moving is not null)
         {
             var a=moving;
             if(a.Generation!=generation||a.ZoneGeneration!=world.ZoneGeneration||!world.CanAct||TravelBusy){Stop("Bewegung unterbrochen");return;}
+            if(a.ExpectedLocationKey.Length>0&&a.ExpectedLocationKey!=world.LocationKey){Stop("Gespeicherte Instanz verlassen");return;}
             if(a.Kind==ActionKind.Move&&DateTimeOffset.UtcNow>a.Deadline){Stop("Bewegungszeit überschritten");return;}
-            var destination=a.Kind==ActionKind.Move?a.Position:world.Entities.SingleOrDefault(e=>e.Identity.Key==a.Target?.Key)?.Position;
+            var destination=a.Kind==ActionKind.Move?a.Position:world.Entities.SingleOrDefault(e=>e.Identity.Key==a.Target?.Key&&(a.TargetObject.Length==0||e.ObjectKey==a.TargetObject))?.Position;
             if(destination is null||world.Position is null){Stop("Ziel verloren; wartet auf neuen Auftrag");return;}
             var distance=world.Position.Distance(destination);
             if(progressPosition is null || progressPosition.Distance(world.Position)>0.5f) {progressPosition=world.Position;progressAt=DateTimeOffset.UtcNow;}
@@ -144,18 +146,18 @@ public sealed class GameExecutor : IDisposable
             if(a.Generation!=generation){pending.Remove(a);Report(a,Outcome.Unknown,"Auftrag entwertet");continue;}
             if(a.Kind==ActionKind.Chat&&chatEchoes.Remove(a.Id)){pending.Remove(a);Report(a,Outcome.Succeeded,"Ausgehende Chatnachricht beobachtet");continue;}
             if(a.Kind==ActionKind.Interact&&world.Menu is not null){pending.Remove(a);Report(a,Outcome.Succeeded,"Dialog nach Interaktion beobachtet");continue;}
-            if(a.Kind==ActionKind.Menu&&world.Menu?.Signature!=a.MenuSignature){pending.Remove(a);Report(a,Outcome.Succeeded,"Dialogzustand nach Auswahl geändert");continue;}
-            if(a.Kind is ActionKind.Teleport or ActionKind.Aethernet or ActionKind.ChangeWorld && world.CanAct&&!world.TravelBusy&&world.ZoneGeneration!=a.ZoneGeneration&&
-                (a.ExpectedTerritory==0||world.Territory==a.ExpectedTerritory)&&(a.ExpectedWorld==0||world.CurrentWorld==a.ExpectedWorld))
+            if(a.Kind==ActionKind.Menu&&a.ExpectedTerritory==0&&world.Menu?.Signature!=a.MenuSignature){pending.Remove(a);Report(a,Outcome.Succeeded,"Dialogzustand nach Auswahl geändert");continue;}
+            if(ActionPolicy.TransitionReached(a,world))
             {pending.Remove(a);ownsTravel=false;Report(a,Outcome.Succeeded,"Reiseziel im aktuellen Spielzustand bestätigt");continue;}
             if(DateTimeOffset.UtcNow>a.Deadline){pending.Remove(a);if(a.Kind is ActionKind.Teleport or ActionKind.Aethernet or ActionKind.ChangeWorld)Stop("Reisezeit überschritten");Report(a,Outcome.Unknown,"Ergebnis nicht bestätigt; keine automatische Wiederholung");}
         }
     }
-    private static IGameObject? Resolve(Identity? target)
+    private static IGameObject? Resolve(Identity? target,string objectKey)
     {
         if(target is null)return null;
         var found=Plugin.ObjectTable.Where(o=>o.IsValid()&&o.Name.ToString().Equals(target.Name,StringComparison.OrdinalIgnoreCase)&&
-            (o is IPlayerCharacter p?p.HomeWorld.RowId==target.HomeWorld:target.HomeWorld==0)).ToArray();return found.Length==1?found[0]:null;
+            (o is IPlayerCharacter p?p.HomeWorld.RowId==target.HomeWorld:target.HomeWorld==0)&&
+            (objectKey.Length==0||o.GameObjectId.ToString(System.Globalization.CultureInfo.InvariantCulture)==objectKey)).ToArray();return found.Length==1?found[0]:null;
     }
     public static Point ToPoint(Vector3 p)=>new(p.X,p.Y,p.Z);
     public static Vector3 ToVector(Point p)=>new(p.X,p.Y,p.Z);

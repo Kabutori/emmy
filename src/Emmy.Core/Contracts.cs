@@ -23,11 +23,12 @@ public record Point(float X, float Y, float Z)
     public float Distance(Point b) => MathF.Sqrt(MathF.Pow(X-b.X,2)+MathF.Pow(Y-b.Y,2)+MathF.Pow(Z-b.Z,2));
     public bool Valid => float.IsFinite(X) && float.IsFinite(Y) && float.IsFinite(Z);
 }
-public record Entity(ulong Id, Identity Identity, Point Position, bool Targetable, string Kind);
+public record Entity(ulong Id, Identity Identity, Point Position, bool Targetable, string Kind)
+{ public string ObjectKey => Id.ToString(System.Globalization.CultureInfo.InvariantCulture); }
 public record MenuOption(int Index, string Text, bool Enabled);
 public record MenuState(string Addon, string Signature, string Prompt, MenuOption[] Options);
 public record WorldState(string ClientId, long ZoneGeneration, Identity? Self, uint Territory, uint CurrentWorld, Point? Position,
-    Entity[] Entities, MenuState? Menu, bool CanAct, bool NavReady, bool NavBusy, bool TravelReady, bool TravelBusy, DateTimeOffset At);
+    Entity[] Entities, MenuState? Menu, bool CanAct, bool NavReady, bool NavBusy, bool TravelReady, bool TravelBusy, DateTimeOffset At,string LocationKey="");
 public record ChatEvent(Guid Id, Channel Channel, Identity Speaker, Identity? Recipient, string Text, bool Own,
     string Audience, long ZoneGeneration, DateTimeOffset At)
 {
@@ -49,7 +50,7 @@ public record Settings(long Revision, Mode Mode, string Persona, string Descript
 }
 public record ActionRequest(Guid Id, ActionKind Kind, long Generation, string ClientId, long ZoneGeneration, DateTimeOffset Deadline,
     string Text = "", Channel Channel = Channel.Operator, Identity? Target = null, Point? Position = null, string MenuSignature = "",
-    int Option = -1, uint Destination = 0, uint ExpectedTerritory = 0, uint ExpectedWorld = 0, bool Confirmed = false);
+    int Option = -1, uint Destination = 0, uint ExpectedTerritory = 0, uint ExpectedWorld = 0, bool Confirmed = false,string TargetObject="",string ExpectedLocationKey="");
 public record ActionResult(Guid Id, Outcome Outcome, string Detail, DateTimeOffset At);
 public record Draft(Guid Id, string Conversation, Guid Trigger, string Text, Channel Channel, Identity? Recipient,
     long Generation, long Revision, DateTimeOffset At);
@@ -60,7 +61,7 @@ public record Diagnostic(DateTimeOffset At, string Kind, string Detail);
 public record BridgeInput(int Protocol, WorldState World, ChatEvent[] Messages, ActionResult[] Results, Frame? Frame);
 public record BridgeOutput(int Protocol, Guid HostEpoch, long Generation, Settings Settings, ActionRequest[] Actions, string Status);
 public record OperatorRequest(ActionKind Kind, Identity? Target = null, Point? Position = null, string Text = "", int Option = -1,
-    uint Destination = 0, uint ExpectedTerritory = 0, uint ExpectedWorld = 0, bool Confirmed = false, string MenuSignature = "", string MenuText = "", string MenuPrompt = "");
+    uint Destination = 0, uint ExpectedTerritory = 0, uint ExpectedWorld = 0, bool Confirmed = false, string MenuSignature = "", string MenuText = "", string MenuPrompt = "",string TargetObject="",string ExpectedLocationKey="");
 public record ProviderResult(bool Success, string Text = "", string Error = "", int InputTokens = 0, int OutputTokens = 0, JsonElement? Tools = null);
 
 public static class ChatCommand

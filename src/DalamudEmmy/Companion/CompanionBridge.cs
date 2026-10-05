@@ -31,6 +31,7 @@ public sealed class CompanionBridge : IDisposable
     private long zone=1,generation=1,localRevision;
     private uint territory,currentWorld;
     private string character="";
+    private string location="";
     private Guid epoch;
     private int exchanging;
     private DateTimeOffset nextExchange,lastSuccess;
@@ -79,8 +80,13 @@ public sealed class CompanionBridge : IDisposable
         var newTerritory=Plugin.ClientState.TerritoryType;
         var newWorld=self?.CurrentWorld.RowId??0;
         var newCharacter=self is null?"":self.Name+"@"+self.HomeWorld.RowId;
-        if(territory!=newTerritory||currentWorld!=newWorld||character!=newCharacter)
-        {territory=newTerritory;currentWorld=newWorld;character=newCharacter;zone++;frame=null;if(!executor.HasTravel)executor.Stop("Gebiet oder Charakter geändert");}
+        var characterChanged=newCharacter.Length>0&&character.Length>0&&character!=newCharacter;
+        var newLocation=LocationKey();
+        var locationChanged=newLocation.Length>0&&location.Length>0&&newLocation!=location;
+        if(newCharacter.Length>0)character=newCharacter;
+        if(newLocation.Length>0||!executor.HasTravel)location=newLocation;
+        if(territory!=newTerritory||currentWorld!=newWorld||characterChanged||locationChanged)
+        {territory=newTerritory;currentWorld=newWorld;zone++;frame=null;if(characterChanged||!executor.HasTravel)executor.Stop("Gebiet oder Charakter geändert");}
         if(DateTimeOffset.UtcNow-lastSuccess>TimeSpan.FromSeconds(4)&&lastSuccess!=default){executor.Stop("Hostverbindung verloren");suspended=true;lastSuccess=default;Status="Hostverbindung verloren; gestoppt";}
         try{executor.Tick(Snapshot(),generation);}catch(Exception ex){Plugin.Log.Warning(ex,"Companion tick failed");executor.Stop("Spielzustand nicht lesbar");}
         if(DateTimeOffset.UtcNow<nextExchange||Interlocked.CompareExchange(ref exchanging,1,0)!=0)return;
@@ -128,7 +134,18 @@ public sealed class CompanionBridge : IDisposable
             .Select(o=>new Entity(o.GameObjectId,IdentityOf(o),GameExecutor.ToPoint(o.Position),o.IsTargetable,o.ObjectKind.ToString())).ToArray();
         var canAct=self is not null&&!Plugin.Condition[ConditionFlag.BetweenAreas]&&!Plugin.Condition[ConditionFlag.BetweenAreas51]&&!Plugin.Condition[ConditionFlag.InCombat]&&!Plugin.Condition[ConditionFlag.OccupiedInCutSceneEvent]&&!Plugin.Condition[ConditionFlag.Unconscious];
         return new(clientId,zone,self is null?null:IdentityOf(self),Plugin.ClientState.TerritoryType,self?.CurrentWorld.RowId??0,self is null?null:GameExecutor.ToPoint(self.Position),
-            entities,Settings.Menus?menu.Read():null,canAct,GameExecutor.NavReady,GameExecutor.NavBusy,GameExecutor.TravelReady,GameExecutor.TravelBusy,DateTimeOffset.UtcNow);
+            entities,Settings.Menus?menu.Read():null,canAct,GameExecutor.NavReady,GameExecutor.NavBusy,GameExecutor.TravelReady,GameExecutor.TravelBusy,DateTimeOffset.UtcNow,LocationKey());
+    }
+    private static unsafe string LocationKey()
+    {
+        var housing=FFXIVClientStructs.FFXIV.Client.Game.HousingManager.Instance();
+        if(housing==null||housing->CurrentTerritory==null)return "";
+        if(housing->IsInside())
+        {
+            var id=housing->GetCurrentIndoorHouseId().Id;
+            return id is 0 or ulong.MaxValue?"":$"housing-indoor:{id}:{housing->GetCurrentRoom()}";
+        }
+        return housing->IsOutside()?$"housing-outdoor:{housing->GetCurrentWard()}:{housing->GetCurrentDivision()}":"";
     }
     private static float VectorDistance(System.Numerics.Vector3 a,System.Numerics.Vector3 b)=>System.Numerics.Vector3.Distance(a,b);
     private static Identity IdentityOf(IGameObject o)=>o is IPlayerCharacter p?new(p.Name.ToString(),p.HomeWorld.RowId,p.HomeWorld.Value.Name.ToString()):new(o.Name.ToString(),0);

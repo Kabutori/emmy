@@ -24,6 +24,7 @@ Keys are protected with Windows user-bound DPAPI. There is no automatic provider
 - Lifestream teleport, aethernet and world-change requests with destination-state verification.
 - Opt-in SelectString and two-button SelectYesno readers, fresh menu signatures and explicitly confirmed selections.
 - Ingame control window and bundled dark browser panel; saved meeting points and a finite itinerary API.
+- Explicit house-visit recipe with estate/room identity, observed door binding, destination checks, fresh vision and provenance-backed visit memories.
 - Offline policy replay, regression executable, repeatable package builds and Windows CI.
 
 ## Develop and verify
