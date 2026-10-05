@@ -169,10 +169,31 @@ public sealed class Companion : BackgroundService
     {
         lock(gate)
         {
-            if(steps.Length is <1 or >16||steps.Any(s=>s.Kind is ActionKind.Follow or ActionKind.Chat or ActionKind.Stop || s.Kind==ActionKind.Menu && string.IsNullOrWhiteSpace(s.MenuText)))return "Ablauf braucht 1 bis 16 endliche, geprüfte Schritte";
+            if(string.IsNullOrWhiteSpace(title)||title.Length>100)return "Der Ablauf braucht einen Namen mit höchstens 100 Zeichen";
+            if(steps is null || steps.Length is <1 or >16)return "Ablauf braucht 1 bis 16 endliche, geprüfte Schritte";
+            if(settings.Mode is Mode.Off or Mode.Observe)return "Betriebsmodus erlaubt keine Ausführung";
+            if(world is null || DateTimeOffset.UtcNow-world.At>TimeSpan.FromSeconds(3))return "Kein aktueller Spielclient verbunden";
+            for(var index=0;index<steps.Length;index++)
+            {
+                var step=steps[index];
+                if(step is null || !Enum.IsDefined(step.Kind) || step.Kind is ActionKind.Follow or ActionKind.Chat or ActionKind.Stop)return $"Schritt {index+1}: keine unterstützte endliche Aktion";
+                if(!step.Confirmed)return $"Schritt {index+1}: ausdrückliche Bestätigung fehlt";
+                var error=step.Kind switch
+                {
+                    ActionKind.Move when !settings.Movement => "Bewegung deaktiviert",
+                    ActionKind.Move when step.Position is not {Valid:true} => "Position ungültig",
+                    ActionKind.Interact when !settings.Menus || step.Target is null => "Interaktionen deaktiviert oder Ziel fehlt",
+                    ActionKind.Menu when !settings.Menus || string.IsNullOrWhiteSpace(step.MenuPrompt) || string.IsNullOrWhiteSpace(step.MenuText) || step.MenuPrompt.Length>2000 || step.MenuText.Length>500 => "Menüs deaktiviert oder genauer Dialog/Auswahl fehlt",
+                    ActionKind.Teleport or ActionKind.Aethernet or ActionKind.ChangeWorld when !settings.Travel || step.Destination==0 || step.ExpectedTerritory==0&&step.ExpectedWorld==0 => "Reisen deaktiviert oder überprüfbares Reiseziel fehlt",
+                    ActionKind.Emote when !settings.Emotes || !new[]{"wave","bow","nod","smile","sit"}.Contains(step.Text) => "Emote nicht erlaubt",
+                    ActionKind.Capture when !settings.Vision => "Bildwahrnehmung deaktiviert",
+                    _ => null
+                };
+                if(error is not null)return $"Schritt {index+1}: {error}";
+            }
             if(actions.Count>0||dispatched.Count>0)return "Zuerst den laufenden Auftrag stoppen";
             if(itinerary?.Status is "Nächsten Schritt vorbereiten" or "Bildauswertung")return "Zuerst den laufenden Ablauf stoppen";
-            visit=null;itinerary=new(Guid.NewGuid(),title,steps,0,"Nächsten Schritt vorbereiten");planDeadline=DateTimeOffset.UtcNow.AddMinutes(10);stepStarted=DateTimeOffset.UtcNow;return null;
+            visit=null;itinerary=new(Guid.NewGuid(),title.Trim(),steps.ToArray(),0,"Nächsten Schritt vorbereiten");planDeadline=DateTimeOffset.UtcNow.AddMinutes(10);stepStarted=DateTimeOffset.UtcNow;return null;
         }
     }
     public string? StartHouseVisit(HouseVisitRequest request)

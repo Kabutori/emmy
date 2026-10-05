@@ -13,7 +13,7 @@ The repository now contains a runnable **0.2.0 companion preview**, not a final 
 | Travel | Lifestream teleport/aethernet/world change and destination checks | Unlock/cost catalog and assisted route editor |
 | Menus | SelectString and two-button SelectYesno snapshots and explicit signature-checked selection | Native callback and house-recipe acceptance, multistage house/NPC dialogs, semantic purchase adapters and economic result checks |
 | UI | Ingame mode/stop/link, local panel, contacts, memory, model, abilities, places and diagnostics | Rich ingame editing, onboarding migration preview, settings search and product polish |
-| Tasks | Finite itinerary API, confirmed-result progression, instance-bound meeting points, explicit house-visit recipe and observation episode | Natural-language arbitrary multistep planning and visual task editor |
+| Tasks | Finite itinerary API, confirmed-result progression, instance-bound meeting points, explicit house-visit recipe, observation episode and ordered browser task editor | Natural-language arbitrary multistep planning, saved reusable task templates and task discovery |
 | Diagnostics | Event/result journal, state export, offline action-policy replay | Full deterministic conversation/model replay and imported recording UI |
 | Voice | Separate operator text channel prepared in contracts | Audio capture, native live-audio provider, interruption, output routing and devices |
 | Fachmodule | Optional integration points documented | Questing, combat, retainers, shopping and demonstration learning |

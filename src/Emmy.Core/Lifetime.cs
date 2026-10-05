@@ -40,6 +40,7 @@ public static class ActionPolicy
         if(action.Kind is ActionKind.Follow or ActionKind.Move && (!settings.Movement || !world.NavReady || world.TravelBusy)) return "Bewegung nicht verfügbar oder Reise aktiv";
         if(action.Kind is ActionKind.Follow or ActionKind.Interact && (action.Target is null || world.Entities.Count(e=>e.Identity.Key==action.Target.Key && e.Targetable && (action.TargetObject.Length==0||e.ObjectKey==action.TargetObject)) != 1)) return "Ziel fehlt oder ist mehrdeutig";
         if(action.Kind == ActionKind.Move && action.Position is not {Valid:true}) return "Position ungültig";
+        if(action.Kind==ActionKind.Move && (action.ExpectedTerritory>0&&action.ExpectedTerritory!=world.Territory || action.ExpectedWorld>0&&action.ExpectedWorld!=world.CurrentWorld))return "Gespeicherter Ort gehört zu einem anderen Gebiet oder einer anderen Welt";
         if(action.Kind==ActionKind.Move&&action.ExpectedLocationKey.Length>0&&action.ExpectedLocationKey!=world.LocationKey)return "Gespeicherter Ort gehört zu einer anderen Instanz";
         if(action.Kind == ActionKind.Interact && !settings.Menus) return "Interaktionen deaktiviert";
         if(action.Kind == ActionKind.Menu && (!settings.Menus || !action.Confirmed || world.Menu is null || world.Menu.Signature != action.MenuSignature ||
