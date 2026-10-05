@@ -1,0 +1,14 @@
+{
+  "Author": "kabut",
+  "Name": "Emmy Companion",
+  "Punchline": "Local AI companion with chat, memory, vision and bounded game actions.",
+  "Description": "0.2.0 preview: Dalamud adapter for Emmy.Host. Native actions require ingame acceptance. Open /emmy for controls and /emmy web for the local panel.",
+  "ApplicableVersion": "any",
+  "Tags": [
+    "chat",
+    "assistant",
+    "roleplay"
+  ],
+  "DalamudApiLevel": 15,
+  "RepoUrl": "https://github.com/Kabutori/emmy"
+}

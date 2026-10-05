@@ -1,0 +1,34 @@
+const {chromium}=require('playwright');
+const fs=require('fs');
+const assert=require('assert/strict');
+(async()=>{
+ const tokenFile=process.env.EMMY_TEST_TOKEN_FILE;
+ if(!tokenFile)throw Error('EMMY_TEST_TOKEN_FILE must point to the isolated test host token.');
+ const token=fs.readFileSync(tokenFile,'utf8').trim(),base='http://127.0.0.1:17840';
+ async function api(path,method='GET',body){const r=await fetch(base+'/api/'+path,{method,headers:{'X-Emmy-Token':token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const text=await r.text();return {status:r.status,data:text?JSON.parse(text):null};}
+ assert.equal((await fetch(base+'/api/state')).status,401);
+ assert.equal((await fetch(base+'/api/state',{headers:{'X-Emmy-Token':token,Origin:'https://unrelated.example'}})).status,403);
+ let state=(await api('state')).data;let s={...state.settings,movement:true,menus:true,vision:true,mode:'Assisted'};
+ assert.equal((await api('settings','PUT',s)).status,200);
+ assert.equal((await api('settings','PUT',s)).status,409);
+ const person={name:'Alice Example',homeWorld:21,worldName:'Ragnarok'};
+ const world={clientId:'synthetic-web-test',zoneGeneration:1,self:{name:'Emmy Miranda',homeWorld:21,worldName:'Ragnarok'},territory:100,currentWorld:21,position:{x:0,y:0,z:0},entities:[{id:1,identity:person,position:{x:10,y:0,z:0},targetable:true,kind:'Player'}],menu:{addon:'SelectString',signature:'test-menu',prompt:'Choose',options:[{index:0,text:'Talk',enabled:true},{index:1,text:'Disabled',enabled:false}]},canAct:true,navReady:true,navBusy:false,travelReady:true,travelBusy:false,at:new Date().toISOString()};
+ const bridge=()=>api('bridge','POST',{protocol:1,world:{...world,at:new Date().toISOString()},messages:[],results:[],frame:null});
+ const output=(await bridge()).data;
+ const browser=await chromium.launch({headless:true,executablePath:process.env.EMMY_CHROMIUM||chromium.executablePath(),args:['--no-sandbox']});const page=await browser.newPage({viewport:{width:1366,height:900}});
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(base+'/#'+token);await page.getByText('Emmy Miranda · Gebiet').waitFor();
+ await page.screenshot({path:'/tmp/emmy-web-desktop.png',fullPage:true});
+ await page.getByRole('button',{name:'Kontakte',exact:true}).click();await page.getByRole('button',{name:'Kontakt hinzufügen'}).click();await page.getByText('Gespräch ',{exact:false}).first().waitFor();
+ state=(await api('state')).data;assert.equal(state.settings.people.length,1);assert.equal(state.settings.people[0].reply,false);
+ await page.getByRole('checkbox').first().check();await page.waitForTimeout(200);assert.equal((await api('state')).data.settings.people[0].reply,true);
+ await bridge();await page.getByRole('button',{name:'Fähigkeiten',exact:true}).click();await page.getByRole('button',{name:'Dieser Person folgen'}).click();
+ const dispatched=(await bridge()).data.actions;assert.equal(dispatched.length,1);assert.equal(dispatched[0].kind,'Follow');assert.equal((await bridge()).data.actions.length,0);
+ await page.getByRole('button',{name:'■ Stop & übernehmen'}).click();assert.ok((await bridge()).data.generation>output.generation);
+ assert.equal((await api('action','POST',{kind:'Menu',option:1,confirmed:true})).status,400);
+ assert.equal((await api('test','POST',{})).data.success,false);
+ await page.getByRole('button',{name:'Wahrnehmung',exact:true}).click();await page.getByRole('button',{name:'Mit DeepSeek ansehen'}).click();await page.getByText('Kein aktuelles Bild.',{exact:false}).waitFor();
+ await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Übersicht',exact:true}).click();await page.screenshot({path:'/tmp/emmy-web-mobile.png',fullPage:true});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.deepEqual(errors,[]);
+ await browser.close();console.log('Web/API checks passed: auth, origin, config conflict, contacts, rights, dispatch-once, stop, disabled menu, provider failure, missing image, responsive layout.');
+})().catch(e=>{console.error(e);process.exit(1)});
