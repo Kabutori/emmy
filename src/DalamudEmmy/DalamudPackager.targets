@@ -1,0 +1,11 @@
+<Project>
+  <!-- The product ZIP is assembled by scripts/build.ps1 with both host and plugin.
+       Keep manifest generation, without the packager's non-repeatable staging ZIP. -->
+  <Target Name="EmmyManifest" AfterTargets="Build">
+    <DalamudPackager ProjectDir="$(ProjectDir)"
+                    OutputPath="$(OutputPath)"
+                    AssemblyName="$(AssemblyName)"
+                    MakeZip="false"
+                    DalamudApiLevel="$(DalamudApiLevel)" />
+  </Target>
+</Project>

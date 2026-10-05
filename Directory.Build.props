@@ -1,0 +1,1 @@
+<Project><PropertyGroup><RestorePackagesWithLockFile>true</RestorePackagesWithLockFile><Deterministic>true</Deterministic></PropertyGroup></Project>

@@ -1,0 +1,14 @@
+{
+  "name": "emmy-ui-checks",
+  "private": true,
+  "scripts": {
+    "check": "node --check src/Emmy.Host/wwwroot/app.js",
+    "test:dom": "node scripts/test-dom.cjs",
+    "test:api": "node scripts/test-api.cjs",
+    "test:browser": "node scripts/test-web.cjs"
+  },
+  "devDependencies": {
+    "jsdom": "30.1.2",
+    "playwright": "1.58.2"
+  }
+}

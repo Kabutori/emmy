@@ -1,0 +1,25 @@
+const assert=require('assert/strict'),fs=require('fs');
+(async()=>{
+ const token=fs.readFileSync(process.env.EMMY_TEST_TOKEN_FILE,'utf8').trim(),base='http://127.0.0.1:17840';
+ const request=async(path,method='GET',body,extra={})=>{const r=await fetch(base+'/api/'+path,{method,headers:{'X-Emmy-Token':token,'Content-Type':'application/json',...extra},body:body===undefined?undefined:JSON.stringify(body)});const text=await r.text();return {status:r.status,data:text?JSON.parse(text):null};};
+ assert.equal((await fetch(base+'/api/state')).status,401);
+ assert.equal((await request('state','GET',undefined,{Origin:'https://unrelated.example'})).status,403);
+ let state=(await request('state')).data;const changed=await request('settings','PUT',{...state.settings,movement:true,menus:true,vision:true});assert.equal(changed.status,200);
+ assert.equal((await request('settings','PUT',state.settings)).status,409);
+ const world={clientId:'isolated-test',zoneGeneration:1,self:{name:'Emmy Miranda',homeWorld:21,worldName:'Ragnarok'},territory:100,currentWorld:21,position:{x:0,y:0,z:0},entities:[],menu:{addon:'SelectString',signature:'fresh',prompt:'Choose',options:[{index:0,text:'Talk',enabled:true},{index:1,text:'Disabled',enabled:false}]},canAct:true,navReady:true,navBusy:false,travelReady:true,travelBusy:false,at:new Date().toISOString()};
+ const exchange=results=>request('bridge','POST',{protocol:1,world:{...world,at:new Date().toISOString()},messages:[],results:results||[],frame:null});
+ const output=(await exchange()).data;
+ assert.equal((await request('action','POST',{kind:'Menu',option:0,menuSignature:'old',confirmed:true})).status,400);
+ assert.equal((await request('action','POST',{kind:'Menu',option:1,menuSignature:'fresh',confirmed:true})).status,400);
+ assert.equal((await request('action','POST',{kind:'Menu',option:0,menuSignature:'fresh',confirmed:true})).status,200);
+ let actions=(await exchange()).data.actions;assert.equal(actions.length,1);assert.equal((await exchange()).data.actions.length,0);
+ await request('stop','POST',{});assert.ok((await exchange()).data.generation>output.generation);
+ assert.equal((await request('test','POST',{})).data.success,false);
+ assert.equal((await request('vision','POST',{text:'What is visible?'})).data.success,false);
+ assert.equal((await request('place','POST',{text:'Our bench'})).status,200);
+ assert.equal((await request('state')).data.places.length,1);
+ const other=await request('bridge','POST',{protocol:1,world:{...world,clientId:'second-client'},messages:[],results:[],frame:null});assert.equal(other.status,400);
+ const before=(await request('state')).data.generation;
+ await new Promise(r=>setTimeout(r,5500));state=(await request('state')).data;assert.equal(state.world,null);assert.ok(state.generation>before);
+ console.log('API checks passed: authentication, cross-origin, revisions, stale/disabled menu, single dispatch, stop, missing key/image, place persistence, second-client rejection and heartbeat expiry.');
+})().catch(e=>{console.error(e);process.exit(1)});

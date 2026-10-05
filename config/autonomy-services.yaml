@@ -1,0 +1,31 @@
+version: 1
+
+repo:
+  id: dalamud-emmy
+  display_name: Dalamud Emmy
+  workdir: /opt/data/repos/dalamud-emmy
+
+defaults:
+  delivery: origin
+  quota_mode: guarded
+  preferred_model: gpt-5.4-mini
+  night_window: "22:00-06:59"
+
+services:
+  - id: emmy-daily-brief
+    display_name: Emmy Brief
+    mode: agent
+    schedule: 30 9 * * *
+    prompt_path: prompts/emmy-brief.prompt.md
+    quota_guard_script: echo_harbor_brief_guard.py
+    purpose: >-
+      Kurzer täglicher Lageüberblick zum Konzept, zur Repo-Klarheit und zum nächsten sinnvollen Schritt.
+
+  - id: emmy-steward
+    display_name: Emmy Steward
+    mode: agent
+    schedule: 40 23 * * *
+    prompt_path: prompts/emmy-steward.prompt.md
+    quota_guard_script: echo_harbor_steward_guard.py
+    purpose: >-
+      Kleine kontrollierte Verbesserungen an Doku, Struktur und Architekturvorbereitung.
