@@ -1,10 +1,12 @@
 const {chromium}=require('playwright');
 const fs=require('fs');
+const path=require('path');
 const assert=require('assert/strict');
 (async()=>{
  const tokenFile=process.env.EMMY_TEST_TOKEN_FILE;
  if(!tokenFile)throw Error('EMMY_TEST_TOKEN_FILE must point to the isolated test host token.');
  const token=fs.readFileSync(tokenFile,'utf8').trim(),base='http://127.0.0.1:17840';
+ const screenshots=process.env.EMMY_SCREENSHOT_DIR||path.resolve('artifacts/browser');fs.mkdirSync(screenshots,{recursive:true});
  async function api(path,method='GET',body){const r=await fetch(base+'/api/'+path,{method,headers:{'X-Emmy-Token':token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const text=await r.text();return {status:r.status,data:text?JSON.parse(text):null};}
  assert.equal((await fetch(base+'/api/state')).status,401);
  assert.equal((await fetch(base+'/api/state',{headers:{'X-Emmy-Token':token,Origin:'https://unrelated.example'}})).status,403);
@@ -18,7 +20,7 @@ const assert=require('assert/strict');
  const browser=await chromium.launch({headless:true,executablePath:process.env.EMMY_CHROMIUM||chromium.executablePath(),args:['--no-sandbox']});const page=await browser.newPage({viewport:{width:1366,height:900}});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(base+'/#'+token);await page.getByText('Emmy Miranda · Gebiet').waitFor();
- await page.screenshot({path:'/tmp/emmy-web-desktop.png',fullPage:true});
+ await page.screenshot({path:path.join(screenshots,'desktop.png'),fullPage:true});
  await page.getByRole('button',{name:'Kontakte',exact:true}).click();await page.getByRole('button',{name:'Kontakt hinzufügen'}).click();await page.getByText('Gespräch ',{exact:false}).first().waitFor();
  state=(await api('state')).data;assert.equal(state.settings.people.length,1);assert.equal(state.settings.people[0].reply,false);
  await page.getByRole('checkbox').first().check();await page.waitForTimeout(200);assert.equal((await api('state')).data.settings.people[0].reply,true);
@@ -28,7 +30,7 @@ const assert=require('assert/strict');
  assert.equal((await api('action','POST',{kind:'Menu',option:1,confirmed:true})).status,400);
  assert.equal((await api('test','POST',{})).data.success,false);
  await page.getByRole('button',{name:'Wahrnehmung',exact:true}).click();await page.getByRole('button',{name:'Mit DeepSeek ansehen'}).click();await page.getByText('Kein aktuelles Bild.',{exact:false}).waitFor();
- await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Übersicht',exact:true}).click();await page.screenshot({path:'/tmp/emmy-web-mobile.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Übersicht',exact:true}).click();await page.screenshot({path:path.join(screenshots,'mobile.png'),fullPage:true});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.deepEqual(errors,[]);
  await browser.close();console.log('Web/API checks passed: auth, origin, config conflict, contacts, rights, dispatch-once, stop, disabled menu, provider failure, missing image, responsive layout.');
 })().catch(e=>{console.error(e);process.exit(1)});
