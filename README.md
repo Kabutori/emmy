@@ -7,7 +7,7 @@ Emmy Miranda is an LLM companion for Final Fantasy XIV. A Dalamud plugin observe
 ## Start on Windows
 
 1. Download the `Emmy-Windows-preview` artifact from [GitHub Actions](https://github.com/Kabutori/emmy/actions) or run `scripts/build.ps1` with .NET 10 and Dalamud installed.
-2. Extract the whole ZIP, run `Install-Plugin.ps1`, and add the printed DLL path under Dalamud's experimental dev plugin locations.
+2. Extract the downloaded artifact ZIP, then its `Emmy-preview.zip`. Run `Install-Plugin.ps1`, and add the printed DLL path under Dalamud's experimental dev plugin locations.
 3. Run `Start-Emmy.ps1` under the same Windows user as FFXIV. The local control panel opens at `http://127.0.0.1:17840`.
 4. Save a DeepSeek key, test the connection, and permit individual contacts. Start in **Assistiert**.
 5. Use `/emmy`, `/emmy web`, `/emmy stop` and `/emmy resume` in game.

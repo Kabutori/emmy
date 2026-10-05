@@ -2,7 +2,7 @@
 
 Requirements: FFXIV through XIVLauncher with Dalamud API 15, a separate character/client if Emmy should stand beside the operator, and a DeepSeek API key for model requests. No Docker or external database is required. The self-contained host includes its .NET runtime.
 
-Extract the complete preview ZIP. Run `Install-Plugin.ps1` in PowerShell. Add the emitted DLL path in `/xlsettings` → Experimental → Dev Plugin Locations. Load Dalamud Emmy. Run `Start-Emmy.ps1`; it starts the matching local host and opens its authenticated control panel. Both processes must use the same Windows account.
+A GitHub artifact download wraps `Emmy-preview.zip` in another ZIP: extract the artifact first, then extract the complete inner preview ZIP. Run `Install-Plugin.ps1` in PowerShell. Add the emitted DLL path in `/xlsettings` → Experimental → Dev Plugin Locations. Load Dalamud Emmy. Run `Start-Emmy.ps1`; it starts the matching local host and opens its authenticated control panel. Both processes must use the same Windows account.
 
 The web panel uses `http://127.0.0.1:17840`. Open it through the start helper or `/emmy web`; opening the address alone does not grant access. The local capability rotates when the host restarts. Keys are entered in Emmy & Modelle and protected by Windows DPAPI, never returned through the API. Start with a provider connection test and assisted mode. Native integrations are disabled until explicitly selected.
 
